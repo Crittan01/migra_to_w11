@@ -1,0 +1,13 @@
+Reporte de Compatibilidad para: DESKTOP-Q0VHFVT
+-----------------------------------------------
+- Architecture: True
+- Boot Method: True
+- CPU Compatibility: True
+- CPU Core Count: True
+- CPU Frequency: True
+- DirectX + WDDM2: False
+- Disk Partition: True
+- Ram Installed: True
+- Secure Boot: True
+- Storage Available: True
+- TPM Version: True

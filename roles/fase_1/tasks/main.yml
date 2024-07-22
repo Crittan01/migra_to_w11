@@ -1,0 +1,236 @@
+---
+# tasks file for roles/fase_1
+- name: 1. Recolectar Información del PC
+  block:
+    - name: 1.1 Validacion de Sistema Operativo
+      ansible.builtin.assert:
+        that:
+          - ansible_distribution == "Microsoft Windows 10 Pro"
+        success_msg: "El Sistema Operativo SI es Windows 10 Pro"
+        fail_msg: "El Sistema Operativo NO es Windows 10 Pro"
+      register: so_out
+
+  rescue:
+    - name: <ERROR> - 1.1 Recolectar Información del PC
+      block:
+        - name: <ERROR> - Validacion de SO
+          ansible.builtin.debug:
+            msg: "No se pudo ejecutar valdiacion de SO, asegúrese de que el PC está ejecutando Windows 10."
+
+        - name: 1.2 Registrar PC No Compatible
+          ansible.builtin.copy:
+            content: "{{ ansible_fqdn }}: NO es compatible con Windows 10\n"
+            dest: roles/fase_1/files/not_compliant_hosts.log
+            mode: a
+            remote_src: false
+          delegate_to: localhost
+
+        - name: 1.3 Falla en ejecucion - Saltar ejecucion de tareas
+          ansible.builtin.fail:
+            msg: "El Sistema Operativo no es Windows 10. Abordando tareas posteriores"
+
+  always:
+    - name: 1.2 Registro Final del Proceso de Recoleccion de informacion
+      ansible.builtin.debug:
+        msg: "Proceso de Recoleccion de Informacion completado para {{ ansible_fqdn }}"
+
+- name: 2. Verificar la Compatibilidad de Hardware con 'WhyNotWin11'
+  when: ansible_distribution == "Microsoft Windows 10 Pro"
+  block:
+    - name: 2.1 Crear Directorio de 'WhyNotWin11' (si no existe)
+      ansible.windows.win_file:
+        path: "{{ fase_1_dir_whynotwin11 }}"
+        state: directory
+
+    - name: 2.2 Validar existencia de Directorio 'WhyNotWin11'
+      ansible.windows.win_stat:
+        path: "{{ fase_1_dir_whynotwin11 }}"
+      register: why_dir_out
+
+#    - name: 2.2 Descargar 'WhyNotWin11'
+#      ansible.windows.win_get_url:
+#        url: https://github.com/rcmaehl/WhyNotWin11/releases/latest/download/WhyNotWin11.exe
+#        dest: "{{ fase_1_dir_whynotwin11 }}/WhyNotWin11.exe"
+#        timeout: 3600
+
+    - name: 2.3 Copiar 'WhyNotWin11' a Directorio
+      ansible.windows.win_copy:
+        src: roles/fase_1/files/WhyNotWin11.exe
+        dest: "{{ fase_1_dir_whynotwin11 }}/WhyNotWin11.exe"
+        remote_src: false
+      when: why_dir_out.stat.exists
+
+    - name: 2.4 Verificar que 'WhyNotWin11' este presente
+      ansible.windows.win_stat:
+        path: "{{ fase_1_dir_whynotwin11 }}/WhyNotWin11.exe"
+      register: whynoywin11_stat
+
+    - name: 2.5 Validar si Salida_Compatibilidad.csv existe
+      ansible.windows.win_stat:
+        path: "{{ fase_1_dir_whynotwin11 }}/Salida_Compatibilidad.csv"
+      register: compt_out
+
+    - name: 2.6 Eliminar Reporte (si existe)
+      ansible.windows.win_file:
+        path: "{{ fase_1_dir_whynotwin11 }}/Salida_Compatibilidad.csv"
+        state: absent
+      when: compt_out.stat.exists
+
+    - name: 2.7 Ejecutar 'WhyNotWin11' (silencioso) y Generar Archivo CSV
+      ansible.windows.win_shell: |
+        {{ fase_1_dir_whynotwin11 }}/WhyNotWin11.exe /e CSV {{ fase_1_dir_whynotwin11 }}/Salida_Compatibilidad.csv /s
+      args:
+        executable: powershell.exe
+      register: whynotwin11_output
+      when: whynoywin11_stat.stat.exists
+
+    - name: 2.8 Leer el Archivo CSV
+      ansible.windows.win_shell: |
+        Get-Content {{ fase_1_dir_whynotwin11 }}/Salida_Compatibilidad.csv
+      changed_when: false
+      register: csv_content
+
+    - name: 2.9 Analizar la Compatibilidad del PC
+      ansible.builtin.set_fact:
+        architecture: "{{ csv_content.stdout_lines[1].split(',')[1] }}"
+        boot_method: "{{ csv_content.stdout_lines[1].split(',')[2] }}"
+        cpu_compatibility: "{{ csv_content.stdout_lines[1].split(',')[3] }}"
+        cpu_core_count: "{{ csv_content.stdout_lines[1].split(',')[4] }}"
+        cpu_frequency: "{{ csv_content.stdout_lines[1].split(',')[5] }}"
+        directx_wddm2: "{{ csv_content.stdout_lines[1].split(',')[6] }}"
+        disk_partition_type: "{{ csv_content.stdout_lines[1].split(',')[7] }}"
+        ram_installed: "{{ csv_content.stdout_lines[1].split(',')[8] }}"
+        secure_boot: "{{ csv_content.stdout_lines[1].split(',')[9] }}"
+        storage_available: "{{ csv_content.stdout_lines[1].split(',')[10] }}"
+        tmp_version: "{{ csv_content.stdout_lines[1].split(',')[11] }}"
+      when: csv_content.stdout_lines | length > 1
+
+    - name: 2.10 <DEBUG> - Compatibilidad del PC
+      ansible.builtin.debug:
+        msg:
+          - "Architecture: {{ architecture }} | Necesario: 64 Bit CPU, 64 Bit OS"
+          - "Boot Method: {{ boot_method }} | Necesario: UEFI"
+          - "CPU Compatibility: {{ cpu_compatibility }} | Necesario: IntelCore (i3, i5, i7, i9) 8va Gen ò AMD Ryzen (3, 5, 7, 9 o Threadripper > 2000)"
+          - "CPU Core Count: {{ cpu_core_count }} | Necesario: 2 o +"
+          - "CPU Frequency: {{ cpu_frequency }} | Necesario: 1 Ghz o +"
+          - "DirectX + WDDM2: {{ directx_wddm2 }} | Necesario: DirectX 12 o + & WDDM2 2.x"
+          - "Disk Partition: {{ disk_partition_type }} | Necesario: GPT"
+          - "Ram Installed {{ ram_installed }} | Necesario: 4 GB o +"
+          - "Secure Boot: {{ secure_boot }} | Necesario: (Habilitado)"
+          - "Storage Available: {{ storage_available }} | Necesario: 64 GB o + [C:]"
+          - "TMP Version: {{ tmp_version }} | Necesario: 2.0 (Habilitado)"
+
+    - name: 2.11 Valor Booleano de compatible
+      ansible.builtin.set_fact:
+        compatible: false
+
+    - name: 2.12 Validar si el PC es Compatible con Windows 11
+      ansible.builtin.set_fact:
+        compatible: true
+      when:
+        - architecture == 'True'
+        - boot_method == 'True'
+        - cpu_compatibility == 'True'
+        - cpu_core_count == 'True'
+        - cpu_frequency == 'True'
+        - directx_wddm2 == 'True'
+        - disk_partition_type == 'True'
+        - ram_installed == 'True'
+        - secure_boot == 'True'
+        - storage_available == 'True'
+        - tpm_version == 'True'
+
+  rescue:
+    - name: <ERROR> - 2.1 Verificar la Compatibilidad de Hardware con 'WhyNotWin11'
+      ansible.builtin.debug:
+        msg: "Error en Proceso de Verificar la Compatibilidad de Hardware con 'WhyNotWin11'"
+
+    - name: Eliminando 'Salida_Compatibilidad.csv'
+      ansible.windows.win_file:
+        path: "{{ fase_1_dir_whynotwin11 }}/Salida_Compatibilidad.csv"
+        state: absent
+      when: compt_out.stat.exists
+
+  always:
+    - name: 2. Proceso de reporte de Contabilidad
+      delegate_to: localhost
+      block:
+        - name: 2.12 Validar si existe reporte de compatibilidad
+          ansible.builtin.stat:
+            path: roles/fase_1/files/compatibility_report_{{ ansible_fqdn }}.txt
+          register: report_out
+
+        - name: 2.13 Eliminar reporte de compatibilidad (si existe)
+          ansible.builtin.file:
+            path: roles/fase_1/files/compatibility_report_{{ ansible_fqdn }}.txt
+            state: absent
+          when: report_out.stat.exists
+
+        - name: 2.14 Generar reporte de compatibilidad
+          ansible.builtin.copy:
+            content: |
+              Reporte de Compatibilidad para: {{ ansible_fqdn }}
+              -----------------------------------------------
+              - Architecture: {{ architecture }}
+              - Boot Method: {{ boot_method }}
+              - CPU Compatibility: {{ cpu_compatibility }}
+              - CPU Core Count: {{ cpu_core_count }}
+              - CPU Frequency: {{ cpu_frequency }}
+              - DirectX + WDDM2: {{ directx_wddm2 }}
+              - Disk Partition: {{ disk_partition_type }}
+              - Ram Installed: {{ ram_installed }}
+              - Secure Boot: {{ secure_boot }}
+              - Storage Available: {{ storage_available }}
+              - TPM Version: {{ tmp_version }}
+            dest: roles/fase_1/files/{{ ansible_fqdn }}-compatibility_report.txt
+            mode: "0644"
+
+- name: 3. Crear punto de restauración
+  when:
+    - not compatible # -- OJO -- Valor REAL: compatible
+    - ansible_distribution == "Microsoft Windows 10 Pro"
+  block:
+    - name: 3.1 Comprobar el estado de Proteccion del Sistema
+      ansible.windows.win_shell: |
+        (Get-ComputerRestorePoint).SequenceNumber
+      args:
+        executable: powershell.exe
+      changed_when: false
+      register: restore_points
+
+    - name: 3.2 Activar la Proteccion del Sistema (si no esta activo)
+      ansible.windows.win_shell: |
+        Enable-ComputerRestore -Drive C:
+      when: restore_points.stdout == ""
+      register: activate_out
+
+    - name: 3.3 Crear Punto de Restauracion
+      ansible.windows.win_shell: |
+        Checkpoint-Computer -Description "Pre-Windows11-Migration" -RestorePointType "MODIFY_SETTINGS"
+      args:
+        executable: powershell.exe
+      register: create_point
+      changed_when: create_point.stdout == ""
+
+    - name: <DEBUG> - Crear Punto de Restauracion
+      ansible.builtin.debug:
+        msg: "{{ create_point.stdout_lines }}"
+      when: create_point.stdout != ""
+
+- name: 4. Parches y Reinicio (En caso +)
+  when:
+    - not compatible # -- OJO -- Valor REAL: compatible
+    - ansible_distribution == "Microsoft Windows 10 Pro"
+  block:
+    - name: 4.1 Validar si hay reinicios pendientes (reiniciar en caso +)
+      ansible.windows.win_reboot:
+      when: ansible_reboot_pending
+
+    - name: 4.2 Aplicar parches de ser Necesario
+      ansible.windows.win_updates:
+        category_names: "*"
+        reboot: true
+      register: update_results
+      retries: 3
+      delay: 120
+      until: update_results.failed_update_count == 0

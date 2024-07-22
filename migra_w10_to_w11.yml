@@ -1,0 +1,36 @@
+---
+- name: Migracion SO Windows 10 a 11
+  hosts: all
+  gather_facts: true
+
+  pre_tasks:
+    - name: Crear Tarea Programada para recuperar Script WinRM
+      community.windows.win_scheduled_task:
+        name: "WinRM Setup"
+        description: "Restaurar Configuración de WinRM"
+        actions:
+          - path: "powershell.exe"
+            arguments: "-NoProfile -ExecutionPolicy Bypass -File C:/temp/ansible/PS/WinRM.ps1"
+        triggers:
+          - type: boot
+        state: present
+        enabled: true
+        user: "SYSTEM"
+        logon_type: service_account
+
+  tasks:
+    - name: FASE 1 - PRE-UPGRADE
+      block:
+        - name: 1 - Validación y Ejecución de Requisitos
+          ansible.builtin.include_role:
+            name: fase_1
+
+    - name: FASE 2 - UPGRADE
+      when:
+        - not compatible # -- OJO -- Valor REAL: compatible
+        - ansible_distribution == "Microsoft Windows 10 Pro"
+      block:
+        - name: 2 - Proceso de Upgrade
+          ansible.builtin.include_role:
+            name: fase_2
+            tasks_from: regedit_main.yml

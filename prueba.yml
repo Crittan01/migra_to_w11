@@ -1,0 +1,148 @@
+---
+- name: Migracion SO Windows 10 a 11
+  hosts: all
+  gather_facts: true
+
+  tasks:
+    - name: 3. Actualizar paquetes de Windows 11
+      vars:
+        ansible_ssh_args: -o ControlMaster=no -o ServerAliveInterval=30
+      block:
+        - name: 3.2 Buscar actualizaciones manualmente
+          ansible.windows.win_updates:
+            category_names: "*"
+            state: searched
+          register: search_results
+
+        - name: 3.3 Descargar actualizaciones
+          ansible.windows.win_updates:
+            category_names: "*"
+            state: downloaded
+          register: download_results
+          when: search_results.updates | length > 0
+
+        - name: 3.4 Instalar actualizaciones
+          ansible.windows.win_updates:
+            category_names: "*"
+            state: installed
+          register: install_results
+          when: download_results.updates | length > 0
+
+        - name: Pausa
+          ansible.builtin.pause:
+            seconds: 30
+
+        - name: 3.5 Reiniciar el servidor para completar la instalación de actualizaciones
+          ansible.windows.win_reboot:
+            msg: "El servidor se reiniciará para completar la instalación de actualizaciones"
+            reboot_timeout: 3600  # Ajuste a 1 hora para manejar reinicios prolongados
+          when: install_results.reboot_required
+
+        - name: 3.4 Instalar todas las actualizaciones pendientes en Windows 11
+          ansible.windows.win_updates:
+            category_names: "*"
+            reboot: true
+          register: update11_results_all
+          retries: 3
+          delay: 120
+          until: update11_results_all.failed_update_count == 0
+
+        - name: 3.5 Reiniciar el servidor para completar la instalación de Windows 11
+          ansible.windows.win_reboot:
+            msg: "El servidor se reiniciará para completar la instalación de Windows 11"
+
+        - name: 3.6 Recoger Facts Windows 11
+          ansible.builtin.setup:
+          register: facts_w11
+
+        - name: 3.7 Datos de Sistema Operativo W11
+          ansible.builtin.debug:
+            msg:
+              - "Nombre de PC: {{ facts_w11.ansible_facts.ansible_hostname }}"
+              - "Version SO: {{ facts_w11.ansible_facts.ansible_distribution }}"
+              - "Arquitectura: {{ facts_w11.ansible_facts.ansible_architecture }}"
+
+        - name: 3.8 Generar reporte de Actualizacion
+          ansible.builtin.copy:
+            content: |
+              Reporte de Actualizacion para: {{ facts_w11.ansible_facts.ansible_hostname }}
+              -----------------------------------------------
+              - Version SO: {{ facts_w11.ansible_facts.ansible_distribution }}
+              - Architecture: {{ facts_w11.ansible_facts.ansible_architecture }}
+            dest: roles/fase_2/files/{{ ansible_fqdn }}-upgrade_report.txt
+            mode: "0644"
+
+
+#    - name: 3. Actualizar paquetes de Windows 11
+#      vars:
+#        ansible_ssh_args: -o ControlMaster=no -o ServerAliveInterval=30
+#      block:
+#        - name: 3.1 Hacer una pausa de 30 segundos
+#          ansible.builtin.pause:
+#            seconds: 30
+#
+#        - name: 3.2 Buscar actualizaciones manualmente
+#          ansible.windows.win_updates:
+#            category_names: "*"
+#            state: searched
+#          register: search_results
+#
+#        - name: 3.3 Descargar actualizaciones
+#          ansible.windows.win_updates:
+#            category_names: "*"
+#            state: downloaded
+#            updates: "{{ search_results.updates }}"
+#          register: download_results
+#          when: search_results.updates | length > 0
+#
+#        - name: 3.4 Instalar actualizaciones
+#          ansible.windows.win_updates:
+#            category_names: "*"
+#            state: installed
+#            updates: "{{ download_results.updates }}"
+#          register: install_results
+#          when: download_results.updates | length > 0
+#
+#        - name: Pausa
+#          ansible.builtin.pause:
+#            seconds: 30
+#
+#        - name: 3.5 Reiniciar el servidor para completar la instalación de actualizaciones
+#          ansible.windows.win_reboot:
+#            msg: "El servidor se reiniciará para completar la instalación de actualizaciones"
+#            reboot_timeout: 3600  # Ajuste a 1 hora para manejar reinicios prolongados
+#          when: install_results.reboot_required
+#
+#        - name: 3.4 Instalar todas las actualizaciones pendientes en Windows 11
+#          ansible.windows.win_updates:
+#            category_names: "*"
+#            reboot: true
+#          register: update11_results_all
+#          retries: 3
+#          delay: 120
+#          until: update11_results_all.failed_update_count == 0
+#
+#        - name: 3.5 Reiniciar el servidor para completar la instalación de Windows 11
+#          ansible.windows.win_reboot:
+#            msg: "El servidor se reiniciará para completar la instalación de Windows 11"
+#
+#        - name: 3.6 Recoger Facts Windows 11
+#          ansible.builtin.setup:
+#          register: facts_w11
+#
+#        - name: 3.7 Datos de Sistema Operativo W11
+#          ansible.builtin.debug:
+#            msg:
+#              - "Nombre de PC: {{ facts_w11.ansible_facts.ansible_hostname }}"
+#              - "Version SO: {{ facts_w11.ansible_facts.ansible_distribution }}"
+#              - "Arquitectura: {{ facts_w11.ansible_facts.ansible_architecture }}"
+#
+#        - name: 3.8 Generar reporte de Actualizacion
+#          ansible.builtin.copy:
+#            content: |
+#              Reporte de Actualizacion para: {{ facts_w11.ansible_facts.ansible_hostname }}
+#              -----------------------------------------------
+#              - Version SO: {{ facts_w11.ansible_facts.ansible_distribution }}
+#              - Architecture: {{ facts_w11.ansible_facts.ansible_architecture }}
+#            dest: roles/fase_2/files/{{ ansible_fqdn }}-upgrade_report.txt
+#            mode: "0644"
